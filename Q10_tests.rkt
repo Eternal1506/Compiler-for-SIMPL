@@ -20,16 +20,13 @@
 
 (define a-primpl
   (compile-simpl
-   '(
-     (fun (main)
-          (vars [(a 10)]
-                (print (f a -4))
-                (print "~n")
-                (return 0)))
-     (fun (f x y)
-          (vars [(i 5)]
-                (return (+ (+ i x) y))))
-     ))
+   (list
+    '(fun (fib n)
+          (vars [] (iif (<= n 2)
+                        (return 1)
+                        (skip))
+                (return (+ (fib (- n 1)) (fib (- n 2))))))
+    ))
   )
 
 a-primpl
@@ -37,8 +34,6 @@ a-primpl
 (define primpl (primplify a-primpl))
 
 primpl
-
-; primpl
 
 (load-primp primpl)
 (run-primp)

@@ -1,12 +1,14 @@
 #lang racket
 
-(define-struct _func (num-args label))
+; By Jay Ren and Pratham Chauhan
+
+(define-struct _func (num-args label epilogue-label))
 
 (define (get-func-label fun funcs)
   (_func-label (hash-ref funcs fun))
   )
-(define (get-func-num-args fun funcs)
-  (_func-num-args (hash-ref funcs fun))
+(define (get-func-epilogue-label fun funcs)
+  (_func-epilogue-label (hash-ref funcs fun))
   )
 
 (define str+ string-append)
@@ -69,7 +71,7 @@
            (sub SP SP ,func-num-args))
          (push-stack 'RETURN-VAL))])]))
 
-(define (compile-stmt stmt syms funcs)
+(define (compile-stmt stmt syms funcs fun)
   (match stmt
     [`(print ,expr)
      (cond
@@ -81,9 +83,9 @@
      (define DONE (gensym 'DONE))
      (append (compile-expr expr syms funcs)
              `((sub SP SP 1) (branch (0 SP) ,TRUE_STMT) (jump ,FALSE_STMT) (label ,TRUE_STMT))
-             (compile-stmt stmt1 syms funcs)
+             (compile-stmt stmt1 syms funcs fun)
              `((jump ,DONE) (label ,FALSE_STMT))
-             (compile-stmt stmt2 syms funcs)
+             (compile-stmt stmt2 syms funcs fun)
              `((label ,DONE)))]
     [`(while ,expr ,stmts ...)
      (define LOOP_START (gensym 'LOOP_START))
@@ -92,20 +94,26 @@
      (append `((label ,LOOP_START))
              (compile-expr expr syms funcs)
              `((sub SP SP 1) (branch (0 SP) ,BODY_START) (jump ,LOOP_DONE) (label ,BODY_START))
-             (foldr (λ (stmt lst) (append (compile-stmt stmt syms funcs) lst)) '() stmts)
+             (foldr (λ (stmt lst) (append (compile-stmt stmt syms funcs fun) lst)) '() stmts)
              `((jump ,LOOP_START) (label ,LOOP_DONE)))]
     [`(set ,var ,expr)
-     (append (compile-expr expr syms funcs) `((sub SP SP 1) (move ,(hash-ref syms var) (0 SP))))]
-    [`(seq ,stmts ...) (foldr (λ (stmt lst) (append (compile-stmt stmt syms funcs) lst)) '() stmts)]
+     (append (compile-expr expr syms funcs) `((sub SP SP 1) (move (,(hash-ref syms var) FP) (0 SP))))]
+    [`(seq ,stmts ...) (foldr (λ (stmt lst) (append (compile-stmt stmt syms funcs fun) lst)) '() stmts)]
     [`(skip) '()]
-    [`(return ,expr) (compile-expr expr syms funcs)]))
+    [`(return ,expr)
+     (append
+      (compile-expr expr syms funcs)
+      `((sub SP SP 1)
+        (move RETURN-VAL (0 SP))
+        (jump ,(get-func-epilogue-label fun funcs)))
+      )
+     ]))
 
 (define (gensyms vars syms)
   (cond
     [(empty? vars) syms]
     [else (gensyms (rest vars) (hash-set syms (first vars)
-                                         ; (gensym (first vars))
-                                         (first vars)
+                                         (gensym (first vars))
                                          ))]))
 
 (define (compile-fun fun funcs)
@@ -121,6 +129,7 @@
      ;  (display init-vals) (newline) (newline)
 
      (define func-label (get-func-label name funcs))
+     (define func-epilogue-label (get-func-epilogue-label name funcs))
      (define const-FP (str->s (str+ (s->str func-label) "_FP")))
      (define const-RETURN_ADDR (str->s (str+ (s->str func-label) "_RETURN_ADDR")))
      (define const-SIZE (str->s (str+ (s->str func-label) "_SIZE")))
@@ -155,13 +164,11 @@
         (add SP SP ,const-SIZE))
 
       ;; Body
-      (foldr (λ (stmt acc) (append (compile-stmt stmt syms funcs) acc)) '() stmts)
-
-      `((move RETURN-VAL (-1 SP))
-        (sub SP SP 1))
+      (foldr (λ (stmt acc) (append (compile-stmt stmt syms funcs name) acc)) '() stmts)
 
       ;; Epilogue
-      `((sub SP SP ,const-SIZE)
+      `((label ,func-epilogue-label)
+        (sub SP SP ,const-SIZE)
         (move FP (,const-FP SP))
         (move RETURN-ADDR (,const-RETURN_ADDR SP))
         (jump RETURN-ADDR))
@@ -185,56 +192,26 @@
        [`(fun (,name ,args ...) ,_)
         (get-function-details
          (rest funs)
-         (hash-set ht name (_func (length args) (gensym name))))])])
+         (hash-set
+          ht name
+          (_func (length args) (gensym name) (gensym (str->s (str+ (s->str name) "_EPILOGUE"))))))])])
   )
 
 (define (compile-simpl funs)
   (check-for-duplicate-names funs (hash))
   (define funcs (get-function-details funs (hash)))
-  (append
-   `((jsr RETURN-ADDR ,(get-func-label 'main funcs))
-     (halt))
-   (foldr (λ (fun result) (append (compile-fun fun funcs) result)) empty funs)
-   `((data RETURN-VAL 0)
-     (data RETURN-ADDR 0)
-     (data FP 0)
-     (data SP END)
-     (label END))))
-
-; (compile-simpl
-;  '(
-;    (fun (f x y)
-;         (vars [(i 10) (j 10)]
-;               (set i (* (* j x) y))
-;               (return (* i i))))
-;    (fun (main)
-;         (vars [(a 10) (b 10)]
-;               (set a (* b (- 4 a)))
-;               (print (f a b))
-;               (return (- 4 4))))
-;    ))
-
-; (compile-simpl
-;  '(
-;    (fun (f x y)
-;         (vars [(i 5)]
-;               (return (+ (+ i x) y))))
-;    (fun (main)
-;         (vars [(a 10) (b 10)]
-;               (print (f a b))
-;               (return 0)))
-;    ))
-
-; (compile-simpl (list
-;                  '(fun (fib n) (vars [] (iif (<= n 2)
-;                                              (return 1)
-;                                              (skip))
-;                                      (return (+ (fib (- n 1)) (fib (- n 2))))))
-;                  '(fun (main) (vars [(n 10) (cur 1)]
-;                                     (while (and (and) (<= cur n))
-;                                     (print (fib cur))
-;                                     (set cur (+ 1 cur)))
-;                                     (return 0)))
-;                  ))
+  (if
+   (not (hash-has-key? funcs 'main))
+   `((halt))
+   (append
+    `((jsr RETURN-ADDR ,(get-func-label 'main funcs))
+      (halt))
+    (foldr (λ (fun result) (append (compile-fun fun funcs) result)) empty funs)
+    `((data RETURN-VAL 0)
+      (data RETURN-ADDR 0)
+      (data FP 0)
+      (data SP END)
+      (label END))))
+  )
 
 (provide compile-simpl)

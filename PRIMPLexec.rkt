@@ -2,7 +2,7 @@
 
 (provide load-primp run-primp)
 
-(define MEM-SIZE 100)
+(define MEM-SIZE 100000)
 
 (define mem (make-vector MEM-SIZE 0))
 (define pc 0)
@@ -117,7 +117,7 @@
 
 ;; print-string : Print a string
 (define (print-string s)
-  (printf "~a" s))
+  (printf s))
 
 ;; print-val : Print an immediate value or contents of memory location
 (define (print-val op)

@@ -133,7 +133,7 @@
     [(? symbol?)
      (cond
        [(hash-has-key? datas dest) (list (resolve-imm dest consts labels datas))] ; wrap in a list
-       [(hash-has-key? consts dest) (error "incorrect")]
+       [(hash-has-key? consts dest) (display dest) (error "incorrect")]
        [(hash-has-key? labels dest) (error "incorrect")]
        [else (error "undefined")])]
     [`(,nat) (list nat)]
